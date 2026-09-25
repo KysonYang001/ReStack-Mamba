@@ -1,6 +1,6 @@
 # ReStack-Mamba
 
-Code for serial-section electron microscopy registration. The workflow is **LEA alignment → two-stage StackMamba refinement → registered volume**.
+Code for serial-section electron microscopy registration. Start with an ordered image stack, generate simulated elastic distortions if needed, then run **LEA alignment → two-stage StackMamba refinement → registered volume**. The original stack remains the reference for evaluating the simulated data.
 
 ## 1. Environment
 
@@ -11,7 +11,43 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-## 2. Training
+## 2. Generate simulated data
+
+Prepare a folder of grayscale PNG slices named `0.png`, `1.png`, … in section order. All slices must have the same height and width. After installing the environment above, run:
+
+```bash
+python tools/generate_elastic_simulation.py \
+  --input_xy <original_slices> \
+  --output_xy <simulated_slices> \
+  --inverse_flow <simulation_dir>/displacement.npy \
+  --alpha 3 --sigma 0.08 --seed 42
+```
+
+| Parameter | What to pass |
+| --- | --- |
+| `--input_xy` | Folder containing the original, undistorted PNG slices. |
+| `--output_xy` | Folder where the simulated PNG slices will be saved. |
+| `--inverse_flow` | Output NPY displacement file, also used by the strength-scaling command below. |
+| `--alpha` | Displacement multiplier; larger values produce stronger distortion. |
+| `--sigma` | Spatial smoothing scale as a fraction of image width. |
+| `--seed` | Random seed; reuse it to repeat the same simulation. |
+
+The script applies a smooth 2D elastic deformation to each section and keeps the first section unchanged. It saves the distorted PNGs, a displacement array of shape `(Z, 2, H, W)`, and `simulation_metadata.json` in the parent of `--output_xy`. Use a separate output folder for each simulation. Pass the simulated PNG folder as `<training_slices>` or `<input_slices>` in the commands below.
+
+To compare several distortion strengths using the **same deformation pattern**, reuse the saved displacement file:
+
+```bash
+python tools/generate_scaled_simulations_from_flow.py \
+  --input_xy <original_slices> \
+  --reference_inverse_flow <simulation_dir>/displacement.npy \
+  --reference_alpha 3 \
+  --alphas 1 2 3 4 5 \
+  --output_root <severity_dir>
+```
+
+`--reference_inverse_flow` is the file saved by the first command; `--reference_alpha` must match the `--alpha` used to create it. `--alphas` lists the desired strengths. Results are saved under `<severity_dir>/alpha_<value>/simulation/XY/`, with settings recorded in each `simulation_metadata.json`.
+
+## 3. Training
 
 **Step 1: train LEA.**
 
@@ -54,7 +90,7 @@ python -m mamba_reg.train_stack_residual_mamba \
 
 `--volume` takes a `Z,Y,X` NPY volume. For paired training, also pass `--target_volume <reference_volume.npy>` to both StackMamba training commands. `--save_dir` contains `best.pth`; `--checkpoint` loads that file for the intermediate inference; `--output_dir` stores the registered volume. Other training options are listed by each command's `--help`.
 
-## 3. Inference
+## 4. Inference
 
 ```bash
 python scripts/reproduce_inference.py \
