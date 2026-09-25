@@ -15,12 +15,6 @@
     "shared": ["jrc_mus_kidney", "jrc_mus_heart", "jrc_mus_pancreas", "jrc_mus_skin"],
     "kasthuri11": ["kasthuri11"]
   },
-  "local_alignment": {
-    "source": "https://github.com/zhangzhenbang2021/vEMRec",
-    "weight": "src/elastic/premodel/openog.pth",
-    "sha256": "c02a92f0070de16422cab682e633b957e670a880880f787c308324468447dcc1",
-    "redistributed_here": false
-  },
   "checkpoint_details": "checkpoint_metadata.json",
   "checkpoint_checksums": "SHA256SUMS"
 }

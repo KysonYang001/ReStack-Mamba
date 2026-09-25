@@ -1,67 +1,59 @@
 # ReStack-Mamba
 
-Code for two-stage residual registration of serial-section volume electron microscopy stacks. This source release was assembled from the **15 server's method code** and validated against its four selected final checkpoints. The checkpoint files will be published separately; their SHA-256 checksums and metadata are included here. The six simulated datasets use the same frozen Stage 1/Stage 2 pair; the real Kasthuri11 experiment uses a separately trained pair. See [checkpoint_manifest.json](checkpoint_manifest.json) for the dataset-to-weight mapping.
+PyTorch implementation of serial-section electron microscopy registration. The pipeline first aligns adjacent sections with LEA, then refines the volume with two StackMamba stages.
 
-## What is in this repository
+## Install
 
-| Path | Purpose |
-| --- | --- |
-| `mamba_reg/` | Exact model, training, local-aligner, inference, and metric source snapshot from the 15 server |
-| `scripts/prepare_simulated_data.py` | Download and simulate the six evaluated OpenOrganelle stacks |
-| `scripts/train_two_stage.py` | Train Stage 1, infer its fixed outputs, then train Stage 2 |
-| `scripts/reproduce_inference.py` | Local alignment, two Mamba stages, two axial trimmed-mean passes, and XY evaluation |
-| `tools/`, `paper_comparison/` | Data conversion, simulation, export, and evaluation used by the pipeline |
-| `analysis_tools/` | Local post-analysis code for volume-wide NCC and MI |
-| `checkpoints/` | Four selected `best.pth` checkpoints; files pending separate publication |
-| `checkpoint_metadata.json`, `SHA256SUMS`, `SOURCE_SHA256SUMS` | Checkpoint-recorded settings and binary/source checksums |
-| `provenance/` | Original 15-server run scripts; these contain server-specific absolute paths and are provided for audit |
+Install a CUDA-compatible PyTorch build and then run `pip install -r requirements.txt && pip install -e .`.
 
-The final simulated-volume model takes the [official vEMRec](https://github.com/zhangzhenbang2021/vEMRec) OpenOrganelle elastic-registration output as its local-alignment input. The vEMRec code and `openog.pth` are third-party artifacts and are **not redistributed here**. Obtain them from the upstream repository's pre-trained-model link and place the checkpoint at `src/elastic/premodel/openog.pth`. The model used on the 15 server has SHA-256 `c02a92f0070de16422cab682e633b957e670a880880f787c308324468447dcc1`.
-
-## Environment
-
-Use Python 3.10+ and a CUDA-compatible PyTorch installation. The 15-server environment used PyTorch `2.5.1+cu121`, CUDA `12.1`, `mamba-ssm==2.2.4`, `causal-conv1d==1.6.2.post1`, NumPy `2.2.6`, and SciPy `1.15.3`. After installing matching PyTorch and CUDA packages:
+## 1. LEA: train and infer
 
 ```bash
-pip install -r requirements.txt
-pip install -e .
-sha256sum -c SOURCE_SHA256SUMS
+python -m mamba_reg.train_lea_local_aligner \
+  --volume_dir <training_slices> --save_dir <lea_weights> --gpu 0
+
+python -m mamba_reg.inference_lea_stack \
+  --input_dir <input_slices> --model_path <lea_weights>/best.pth \
+  --output_dir <lea_output> --gpu 0
 ```
 
-Install vEMRec in its own environment following its upstream instructions. If local alignment has already been generated, use `--aligned-volume` and a vEMRec installation is unnecessary for the two StackMamba stages.
+`--volume_dir` and `--input_dir` are folders of consecutively ordered image slices. `--save_dir` stores LEA checkpoints; `--model_path` selects one checkpoint; `--output_dir` stores the registered PNG slices and `registered_volume_uint8.npy`. `--gpu` selects the CUDA device. Optional `--coarse_align` enables rigid edge-based pre-alignment; the other LEA options are shown by `--help`.
 
-## Reproduce inference
+## 2. StackMamba: train and infer
 
-OpenOrganelle data are downloaded directly from the public Janelia S3 N5 store by the included utility. It transposes and bilinearly resizes scale `s4` sections to `800×800`. The simulator uses seed `42`, Gaussian scale `0.08`, and deformation magnitude `4` for `jrc_mus_liver` or `3` for the other five datasets. The source server's `orignal` directory spelling is retained for path compatibility.
+Train Stage 1 on the LEA output, run Stage 1 inference, then train Stage 2 on that result. For paired simulated data, add `--target_volume <reference_volume.npy>` to each training command; omit it for unpaired data.
 
 ```bash
-python scripts/prepare_simulated_data.py --data-root data
+python -m mamba_reg.train_stack_residual_mamba \
+  --volume <lea_output>/registered_volume_uint8.npy \
+  --save_dir <stage1_weights> --gpu 0
 
-python scripts/reproduce_inference.py \
-  --input-xy data/jrc_mus_kidney/simulated/XY \
-  --reference-xy data/jrc_mus_kidney/orignal/XY \
-  --vemrec-root /path/to/vEMRec \
-  --vemrec-python /path/to/vemrec-env/bin/python \
-  --checkpoint-set shared --gpu 0 --output runs/jrc_mus_kidney
+python -m mamba_reg.inference_stack_residual_mamba \
+  --volume <lea_output>/registered_volume_uint8.npy \
+  --checkpoint <stage1_weights>/best.pth \
+  --output_dir <stage1_output> --gpu 0
+
+python -m mamba_reg.train_stack_residual_mamba \
+  --volume <stage1_output>/registered_volume_uint8.npy \
+  --save_dir <stage2_weights> --gpu 0
+
+python -m mamba_reg.inference_stack_residual_mamba \
+  --volume <stage1_output>/registered_volume_uint8.npy \
+  --checkpoint <stage2_weights>/best.pth \
+  --output_dir <stage2_output> --gpu 0
 ```
 
-The result is `runs/jrc_mus_kidney/final_volume.npy`; per-section XY metrics are in `XY_metrics.csv`, all-view PSNR/SSIM in `metrics_volume/`, volume-wide NCC/MI in `ncc_mi_3d.csv`, and image slices in `views/XY`, `views/XZ`, and `views/YZ`. The script resumes existing stage outputs and checks section continuity, shape, checkpoint hashes, and volume type. Replace the dataset name for the other five simulated volumes. Use `--checkpoint-set kasthuri11` for the 1,024-section Kasthuri11 central crop. Real-data results are qualitative because no undeformed reference is available.
+`--volume` and optional `--target_volume` take `Z,Y,X` NPY volumes. `--save_dir` stores training checkpoints; `--checkpoint` loads a trained weight; `--output_dir` stores the registered volume; `--gpu` selects the CUDA device. The Stage 2 volume is `<stage2_output>/registered_volume_uint8.npy`. Run `--help` on either module for model, crop, and optimizer options.
 
-You can supply an existing local-alignment volume instead:
+## 3. Final volume and outputs
+
+The final axial aggregation is applied twice:
 
 ```bash
-python scripts/reproduce_inference.py \
-  --input-xy /path/to/numeric/XY \
-  --aligned-volume /path/to/local_alignment_uint8.npy \
-  --checkpoint-set shared --output runs/example
+python tools/trimmed_mean_volume_z.py --input <stage2_output>/registered_volume_uint8.npy --output <output>/trim_pass1.npy --radius 2 --trim 1
+python tools/trimmed_mean_volume_z.py --input <output>/trim_pass1.npy --output <output>/final_volume.npy --radius 2 --trim 1
 ```
 
-## Retrain
+`--input` is the source volume, `--output` names the saved NPY file, `--radius` sets the axial neighborhood, and `--trim` removes extreme values before averaging. The final result is `<output>/final_volume.npy`. Use `paper_comparison/export_volume_xy.py` and `tools/make_orthogonal_slices.py` to export XY, XZ, and YZ PNG views.
 
-The shared simulated-volume stages were trained on **paired** locally aligned/reference volumes from `jrc_mus_kidney`, `jrc_mus_heart`, `jrc_mus_pancreas`, and `jrc_mus_skin`. `jrc_mus_liver` and `jrc_mus_liver3` were evaluated with those frozen checkpoints. Kasthuri11 stages were trained without reference targets. `checkpoint_metadata.json` records the actual hyperparameters embedded in each selected checkpoint: the released StackMamba stages use width `48`, depth `4`, and maximum residual flow `1.0`. The shared checkpoints were selected at epoch `5` for both stages; Kasthuri11 at epochs `2` and `10`. See [REPRODUCIBILITY.md](REPRODUCIBILITY.md) for exact preparation and training commands.
-
-The training implementation does not force all random seeds, so retraining is not guaranteed to yield byte-identical weights. Inference with the selected weights requires the separately published checkpoints, the specified inputs, and the settings recorded here.
-
-## Data and attribution
-
-This repository does not contain the source microscopy volumes or the vEMRec model. The six simulated volumes are derived from the [OpenOrganelle datasets](https://openorganelle.janelia.org/); obtain Kasthuri11 data from its original source and prepare the same 1,024-section central crop for the real-data comparison. Cite the dataset sources and [vEMRec](https://github.com/zhangzhenbang2021/vEMRec) when using their data or local-alignment implementation.
+Selected trained weights are being published separately. `checkpoint_manifest.json` lists their expected paths and hashes.
