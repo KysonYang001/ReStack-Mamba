@@ -87,7 +87,7 @@ def padded_sequence(seq, radius):
 
 
 @torch.no_grad()
-def run_vemrec_pass(seq, names, model, device, radius, layer_range, sigma, desc):
+def run_lea_pass(seq, names, model, device, radius, layer_range, sigma, desc):
     if len(seq) < 2:
         return [img.copy() for img in seq]
     height, width = seq[0].shape
@@ -202,7 +202,7 @@ def main(args):
             order = list(range(len(current) - 1, -1, -1))
             ordered_seq = [current[idx] for idx in order]
             ordered_names = [names[idx] for idx in order]
-            ordered_out = run_vemrec_pass(
+            ordered_out = run_lea_pass(
                 ordered_seq,
                 ordered_names,
                 model,
@@ -217,7 +217,7 @@ def main(args):
                 next_seq[idx] = img
             current = next_seq
         else:
-            current = run_vemrec_pass(
+            current = run_lea_pass(
                 current,
                 names,
                 model,
