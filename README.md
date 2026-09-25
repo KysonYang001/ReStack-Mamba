@@ -35,7 +35,8 @@ python -m mamba_reg.inference_lea_stack \
 ```bash
 python -m mamba_reg.train_stack_residual_mamba \
   --volume <lea_output>/registered_volume_uint8.npy \
-  --save_dir <stage1_dir> --gpu 0
+  --save_dir <stage1_dir> --gpu 0 \
+  --feature_dim 48 --mamba_depth 4 --residual_max_flow 1.0
 
 python -m mamba_reg.inference_stack_residual_mamba \
   --volume <lea_output>/registered_volume_uint8.npy \
@@ -47,7 +48,8 @@ python -m mamba_reg.inference_stack_residual_mamba \
 ```bash
 python -m mamba_reg.train_stack_residual_mamba \
   --volume <stage1_output>/registered_volume_uint8.npy \
-  --save_dir <stage2_dir> --gpu 0
+  --save_dir <stage2_dir> --gpu 0 \
+  --feature_dim 48 --mamba_depth 4 --residual_max_flow 1.0
 ```
 
 `--volume` takes a `Z,Y,X` NPY volume. For paired training, also pass `--target_volume <reference_volume.npy>` to both StackMamba training commands. `--save_dir` contains `best.pth`; `--checkpoint` loads that file for the intermediate inference; `--output_dir` stores the registered volume. Other training options are listed by each command's `--help`.
