@@ -1,0 +1,22 @@
+[project]
+name = "restack-mamba"
+version = "0.1.0"
+description = "Two-stage StackMamba refinement for serial-section volume EM registration."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.1",
+  "torchvision",
+  "einops",
+  "mamba-ssm",
+  "causal-conv1d",
+  "numpy",
+  "scipy",
+  "tensorstore==0.1.78",
+  "pillow",
+  "tqdm",
+  "lpips",
+]
+
+[tool.setuptools]
+packages = ["mamba_reg"]

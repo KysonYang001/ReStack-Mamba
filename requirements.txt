@@ -1,0 +1,13 @@
+torch==2.5.1
+torchvision==0.20.1
+torchaudio==2.5.1
+mamba-ssm==2.2.4
+causal-conv1d==1.6.2.post1
+einops==0.8.2
+numpy
+pillow
+tqdm
+tifffile
+lpips==0.1.4
+scipy==1.15.3
+tensorstore==0.1.78
