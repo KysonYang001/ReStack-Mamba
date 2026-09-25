@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Run the exact two-stage inference used for the released checkpoints.
-
-The local alignment executable/weight is supplied by the upstream vEMRec
-project. Use --aligned-volume when that stage has already been computed.
-"""
+"""Run LEA alignment and two-stage StackMamba inference."""
 
 import argparse
 import hashlib
@@ -59,45 +55,44 @@ def check_volume(path, depth):
 
 def main(args):
     output = args.output.resolve()
-    checkpoints = check_weights(args.checkpoint_set)
+    if args.stage1_checkpoint or args.stage2_checkpoint:
+        if not args.stage1_checkpoint or not args.stage2_checkpoint:
+            raise ValueError("Pass both --stage1-checkpoint and --stage2-checkpoint")
+        checkpoints = [args.stage1_checkpoint.resolve(), args.stage2_checkpoint.resolve()]
+        for checkpoint in checkpoints:
+            if not checkpoint.is_file():
+                raise FileNotFoundError(checkpoint)
+    else:
+        checkpoints = check_weights(args.checkpoint_set)
     input_xy = args.input_xy.resolve()
     input_files = numeric_slices(input_xy)
     depth = len(input_files)
     if args.verify_only:
         if args.aligned_volume:
             check_volume(args.aligned_volume.resolve(), depth)
-        elif args.vemrec_root:
-            model = args.vemrec_root.resolve() / "src" / "elastic" / "premodel" / "openog.pth"
-            if not model.is_file():
-                raise FileNotFoundError(model)
+        elif args.lea_checkpoint and not args.lea_checkpoint.is_file():
+            raise FileNotFoundError(args.lea_checkpoint)
         print(f"Verified {depth} input slices and both {args.checkpoint_set} checkpoints.")
         return
     if args.aligned_volume:
         aligned = args.aligned_volume.resolve()
         check_volume(aligned, depth)
     else:
-        if not args.vemrec_root or not args.vemrec_python:
-            raise ValueError("Pass --vemrec-root and --vemrec-python, or --aligned-volume")
-        vemrec_root = args.vemrec_root.resolve()
-        elastic = vemrec_root / "src" / "elastic"
-        model = elastic / "premodel" / "openog.pth"
+        if not args.lea_checkpoint:
+            raise ValueError("Pass --lea-checkpoint or --aligned-volume")
+        model = args.lea_checkpoint.resolve()
         if not model.is_file():
-            raise FileNotFoundError(f"Upstream local-alignment weight missing: {model}")
-        aligned_xy = output / "local_alignment" / "XY"
+            raise FileNotFoundError(model)
+        aligned_xy = output / "local_alignment" / "registered_png"
         aligned = output / "local_alignment" / "registered_volume_uint8.npy"
         if not aligned.is_file():
-            aligned_xy.mkdir(parents=True, exist_ok=True)
-            if len(list(aligned_xy.glob("*.png"))) != depth:
-                run(
-                    [args.vemrec_python.resolve(), "single_process.py", "--input_dir", input_xy,
-                     "--output_dir", aligned_xy, "--model_path", model, "--iters", 3,
-                     "--iter_T", 2, "--sigma", 3.0, "--r", 1, "--L", 1],
-                    cwd=elastic,
-                    env={**os.environ, "CUDA_VISIBLE_DEVICES": str(args.gpu)},
-                )
+            run(
+                [sys.executable, "-m", "mamba_reg.inference_lea_stack",
+                 "--input_dir", input_xy, "--output_dir", output / "local_alignment",
+                 "--model_path", model, "--gpu", 0, "--iters", 3],
+                env={**os.environ, "CUDA_VISIBLE_DEVICES": str(args.gpu)},
+            )
             numeric_slices(aligned_xy)
-            run([sys.executable, ROOT / "tools" / "png_stack_to_npy.py",
-                 "--input_dir", aligned_xy, "--output", aligned])
         check_volume(aligned, depth)
 
     if args.local_align_only:
@@ -180,8 +175,9 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--checkpoint-set", choices=("shared", "kasthuri11"), default="shared")
     parser.add_argument("--gpu", type=int, default=0)
-    parser.add_argument("--vemrec-root", type=Path, help="Checkout of upstream zhangzhenbang2021/vEMRec")
-    parser.add_argument("--vemrec-python", type=Path, help="Python executable in vEMRec environment")
+    parser.add_argument("--lea-checkpoint", type=Path, help="Trained LEA best.pth")
+    parser.add_argument("--stage1-checkpoint", type=Path, help="Stage 1 StackMamba best.pth")
+    parser.add_argument("--stage2-checkpoint", type=Path, help="Stage 2 StackMamba best.pth")
     parser.add_argument("--aligned-volume", type=Path, help="Precomputed local alignment in Z,Y,X uint8 NPY")
     parser.add_argument("--reference-xy", type=Path, help="Optional undeformed reference XY slices")
     parser.add_argument("--reference-xz", type=Path, help="Optional precomputed reference XZ slices")
